@@ -445,7 +445,7 @@ class BasePlugin:
                             updateDeviceByDevId(mac, connected, "", "",
                                                 name)
                         if(name != Devices[x].Name):                             
-                            url = "192.168.178.97:{}/json.htm?param=renamedevice&type=command&idx={}&name={}".format(Parameters['Port'],Devices[x].ID,name)
+                            url = "http://192.168.178.46:{}/json.htm?param=renamedevice&type=command&idx={}&name={}".format(Parameters['Port'],Devices[x].ID,name)
                             Domoticz.Debug("BLZ: new name!  call: {}".format(url))
                             contents = urllib.request.urlopen(url).read()
 
