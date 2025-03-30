@@ -50,16 +50,16 @@ Person Images are from [DomoticzIcons](https://drive.google.com/folderview?id=0B
 - a running Domoticz: 2020.2 or 2021.1 with Python 3.7
 - Python >= 3.7 (mainly depending on requirements for fritzconnection)
 - install needed python modules:
-    - fritzconnection version 1.4.0
-    - urllib3
-    - or even better use `sudo pip3 install -r requirements.txt` 
-    - might be worth testing fritzconnection - just run `fritzconnection`
+    - sudo apt install python3-pip
+    - sudo pip install fritzconnection
+    - sudo pip install urllib3
+        - might be worth testing fritzconnection - just run `fritzconnection`
 - clone project
     - go to `domoticz/plugins` directory 
     - clone the project
         ```bash
         cd domoticz/plugins
-        git clone https://github.com/belzetrigger/domoticz-FritzPresence.git
+        git clone https://github.com/schurgan/domoticz-FritzPresence.git
         ```
 - or just download, unzip and copy to `domoticz/plugins` 
 - optional: adapt naming convention
