@@ -7,7 +7,7 @@
 """
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin key="FritzPresence" name="Fritz!Presence Plugin"
-        author="belze" version="0.7.1-fixed"
+        author="belze" version="0.8.0-fixed"
         externallink="https://github.com/belzetrigger/domoticz-FritzPresence">
 
     <description>
