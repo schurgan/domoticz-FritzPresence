@@ -1,4 +1,4 @@
-# plugin for fritz box
+# Plugin für Fritz!Box
 #
 # Author: belze/schurgan
 # Fixed & cleaned by ChatGPT (12.2025)
