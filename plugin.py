@@ -1,12 +1,11 @@
-# plugin for fritz box
+# Plugin für Fritz!Box
 #
-# Author: belze
+# Author: belze/schurgan/ChatGPT
 #
-
 
 """
 <plugin key="FritzPresence" name="Fritz!Presence Plugin"
-    author="belze" version="0.7.0" 
+    author="belze/schurgan/ChatGPT" version="1.0.0" 
     externallink="https://github.com/belzetrigger/domoticz-FritzPresence" >
     
     <!--    
@@ -81,12 +80,10 @@
 """
 from blz import blzHelperInterface
 import re
-
-#BLZ 2021-04-21: new lib for renamin work around via JSON-API
 import urllib
-# import datetime as dt
 from datetime import datetime, timedelta
 import sys
+
 from typing import List
 try:
     import Domoticz
@@ -97,20 +94,15 @@ except ImportError:
     from blz.fakeDomoticz import Images
 
 #from blz.blzHelperInterface import BlzHelperInterface
-
-
 try:
     from fritzhelper.fritzHelper import FritzHelper
 except ImportError as e:
     pass
 
 import urllib.request                   #for name hack via JSON-API Call
-
-# sys.path
-# sys.path.append('/usr/lib/python3/dist-packages')
-# sys.path.append('/volume1/@appstore/python3/lib/python3.5/site-packages')
-# sys.path.append('/volume1/@appstore/py3k/usr/local/lib/python3.5/site-packages')
-# sys.path.append('C:\\Program Files (x86)\\Python37-32\\Lib\\site-packages')
+from urllib.parse import quote_plus
+import traceback
+import urllib.error
 
 PARAM_PASS: str = 'Password'  # parameter that holds password
 
@@ -168,6 +160,7 @@ class BasePlugin:
         self.errorCounter = 0
         self.macList: List[str] = []
         self.nameList: List[str] = []
+        self.rename_enabled = True
 
         return
 
@@ -212,23 +205,9 @@ class BasePlugin:
             Domoticz.Log("Mac Addresses are empty. Use admin switch to add.")
         else:
             self.macList = Parameters["Mode5"].split(';')
-            # BLZ 2021-04-20: Test without names, just use macs .... 
-            # we would update name later with hostname from fritz box anyway
             Domoticz.Debug("Now we just use MAC as names for init, should replaced later with name from Fritz!Box.")
             self.nameList = Parameters["Mode5"].split(';')
-            # just for security
-            # if(Parameters['Name'] is not None):
-            #    self.nameList = Parameters['Name'].split(';')
-            #    # just for quality
-            #    if(len(self.nameList) != len(self.macList)):
-            #        Domoticz.Error("Amount of Names does not fit defined addresses. Use now MAC Address as names.")
-            #        self.nameList = Parameters["Mode5"].split(';')
-            # else:
-            #    Domoticz.Error("No Names defined in configuration. Using mac addresses first.")
-            #    self.nameList = Parameters["Mode5"].split(';')
-        
-        self.defName = None
-
+            
         # check images
         checkImages(ICON_ADMIN, ICON_ADMIN + ".zip")
         checkImages(ICON_BOX, ICON_BOX + ".zip")
@@ -253,17 +232,9 @@ class BasePlugin:
             if not blzHelperInterface.isValidMAC(mac):
                 Domoticz.Error("Invalid MAC Address on index {}='{}' skip this entry.".format(i, mac))
                 continue
-            #if(self.nameList[i]):
-            #    devName = self.nameList[i]
-            #else:
-            #    devName = "{}_{}".format(Parameters['Name'], self.macList[i])
-            
-            # Check if devices need to be created
-            createDevice(unit=i + UNIT_DEV_START_IDX, devName=mac, devId=mac)
-            # init with empty data
-            updateDeviceByDevId(devId=mac, alarmLevel=0, alarmData="No Data jet", name=mac)
-            # BLZ: 2021-04-19: removed to avoid overwriting custom images see issue#2
-            # updateImageByDevId(self.macList[i], ICON_PERSON)
+            u = createDevice(unit=None, devName=mac, devId=mac)
+            if u is not None:
+                updateDeviceByDevId(devId=mac, alarmLevel=0, alarmData="No Data jet", name=mac)
 
         # blz: test first init, after that get helper
         self.fritz = FritzHelper(self.host, self.user, self.password,
@@ -338,15 +309,16 @@ class BasePlugin:
             Domoticz.Error("Error on deal with WiFi unit {}: msg *{}*;".format(Unit, e))
 
     def removeAllDevices(self):
-        # does only work in python 2 keys = Devices.keys()
-        # so for 3.x use list to avoid iterator
         for x in list(Devices):
             if Devices[x].Unit >= UNIT_DEV_START_IDX:
                 dev = Devices[x]
-                mac = dev.DeviceID
-                idx = dev.Unit
-                Domoticz.Debug("remove device unit: {} mac: {}".format(idx, mac))
+                mac = (dev.DeviceID or "").strip()
+                if not blzHelperInterface.isValidMAC(mac):
+                    Domoticz.Debug(f"removeAllDevices: skip unit={dev.Unit} (DeviceID not MAC): {mac}")
+                    continue
+                Domoticz.Debug(f"removeAllDevices: remove unit={dev.Unit} mac={mac}")
                 dev.Delete()
+
 
     def createDevicesFromHosts(self, hosts):
         """[summary]
@@ -386,73 +358,116 @@ class BasePlugin:
         Domoticz.Log("onDisconnect called")
 
     def onHeartbeat(self):
-        Domoticz.Log("onHeartbeat called")
-        myNow = datetime.now()
-        if myNow >= self.nextpoll:
-            Domoticz.Debug(
-                "----------------------------------------------------")
+        try:
+            Domoticz.Debug("onHeartbeat called")
+            myNow = datetime.now()
 
-            # TODO handle fritz is None
-            if(self.fritz is None):
-                Domoticz.Error(
-                    "Uuups. Fritz is None. Try to recreate.")
-                self.fritz = FritzHelper(self.host, self.user, self.password,
-                                         self.macList)
+            if myNow < self.nextpoll:
+                return
 
+            Domoticz.Debug("----------------------------------------------------")
+
+            # FritzHelper ggf. wiederherstellen
+            if self.fritz is None:
+                Domoticz.Error("Uuups. Fritz is None. Try to recreate.")
+                self.fritz = FritzHelper(self.host, self.user, self.password, self.macList)
+
+            # Standard: nächster Poll nach pollinterval
             self.nextpoll = myNow + timedelta(seconds=self.pollinterval)
 
-            # read info it it is time
+            # Status von Fritz lesen
             self.fritz.readStatus()
 
-            # check for error
-            if(self.fritz is None or self.fritz.hasError is True):
+            # Fehlerbehandlung
+            if self.fritz is None or self.fritz.hasError is True:
                 self.errorCounter += 1
-                Domoticz.Error(
-                    "Uuups. Something went wrong ... Shouldn't be here.")
+                Domoticz.Error("Uuups. Something went wrong ... Shouldn't be here.")
+
                 t = "Error"
                 if self.debug is True and self.fritz is not None:
                     Domoticz.Debug(self.fritz.getSummary())
-                if(self.fritz is not None and self.fritz.hasError is True):
+                if self.fritz is not None and self.fritz.hasError is True:
                     t = "{}:{}".format(t, self.fritz.errorMsg)
 
-                updateDeviceByUnit(UNIT_CMD_SWITCH_IDX, 0, t, 'Error')
+                updateDeviceByUnit(UNIT_CMD_SWITCH_IDX, 0, t, "Error")
 
+                # alle Devices auf "abwesend / timeout"
                 for x in Devices:
+                    if Devices[x].Unit < UNIT_DEV_START_IDX:
+                        continue
                     mac = Devices[x].DeviceID
                     Devices[x].TimedOut = True
-                    updateDeviceByDevId(mac, 0, "")  # ""t"", 'Fritz!Box - Error')
+                    updateDeviceByDevId(mac, 0, "")
 
-                    # TODO error image or error on text, but preserve name
-                    # updateImageByDevId(mac, ICON_PERSON)
+                # Backoff (damit kein Log-Spam / keine Dauerlast)
+                backoff = min(300, 30 * self.errorCounter)  # 30s, 60s, 90s ... max 5min
+                Domoticz.Error(f"FritzPresence: error backoff {backoff}s (errorCounter={self.errorCounter})")
+                self.nextpoll = myNow + timedelta(seconds=backoff)
 
-                self.nextpoll = myNow
             else:
+                # OK-Zweig
                 self.errorCounter = 0
-                updateDeviceByUnit(Unit=UNIT_CMD_SWITCH_IDX, alarmLevel=1, alarmData="", name=UNIT_CMD_SWITCH_NAME,
-                                   dscr="Configure your devices", alwaysUpdate=True)
 
-                # check for all devices the state
+                updateDeviceByUnit(
+                    Unit=UNIT_CMD_SWITCH_IDX,
+                    alarmLevel=1,
+                    alarmData="",
+                    name=UNIT_CMD_SWITCH_NAME,
+                    dscr="Configure your devices",
+                    alwaysUpdate=True
+                )
+
+                # Geräte aktualisieren
                 for x in Devices:
-                    if Devices[x].Unit >= UNIT_DEV_START_IDX:
-                        mac = Devices[x].DeviceID
-                        name = self.fritz.getDeviceName(mac)
-                        Domoticz.Debug("nr {} mac {} name {}".format(x, mac, name))
-                        
-                        if self.fritz.needsUpdate(mac) is True:
-                            connected = 1
-                            if(self.fritz.isDeviceConnected(mac) is False):
-                                connected = 0
-                            updateDeviceByDevId(mac, connected, "", "",
-                                                name)
-                        if(name != Devices[x].Name):                             
-                            url = "http://192.168.178.46:{}/json.htm?param=renamedevice&type=command&idx={}&name={}".format(Parameters['Port'],Devices[x].ID,name)
-                            Domoticz.Debug("BLZ: new name!  call: {}".format(url))
-                            contents = urllib.request.urlopen(url).read()
+                    if Devices[x].Unit < UNIT_DEV_START_IDX:
+                        continue
 
+                    mac = Devices[x].DeviceID
+                    name = (self.fritz.getDeviceName(mac) or "").strip()
 
+                    Domoticz.Debug("nr {} mac {} name {}".format(x, mac, name))
 
-            Domoticz.Debug(
-                "----------------------------------------------------")
+                    # Status-Update nur wenn nötig
+                    if self.fritz.needsUpdate(mac) is True:
+                        connected = 1 if self.fritz.isDeviceConnected(mac) else 0
+                        updateDeviceByDevId(mac, connected, "", "", name)
+
+                    # Rename nur wenn aktiviert + Name geändert
+                    if getattr(self, "rename_enabled", True) and name and name != Devices[x].Name:
+                        try:
+                            domo_host = "127.0.0.1"
+                            domo_port = str(Parameters["Port"])
+                            safe_name = quote_plus(name)
+
+                            url = (
+                                f"http://{domo_host}:{domo_port}/json.htm?"
+                                f"param=renamedevice&type=command&idx={Devices[x].ID}&name={safe_name}"
+                            )
+
+                            Domoticz.Debug(f"FritzPresence: rename via JSON API: {url}")
+
+                            req = urllib.request.Request(
+                                url,
+                                headers={"User-Agent": "Domoticz-FritzPresence"}
+                            )
+                            urllib.request.urlopen(req, timeout=5).read()
+
+                        except urllib.error.HTTPError as e:
+                            if e.code == 401:
+                                Domoticz.Error("FritzPresence: rename disabled (Domoticz returned 401 Unauthorized).")
+                                self.rename_enabled = False
+                            else:
+                                Domoticz.Error(f"FritzPresence: rename HTTP error {e.code}: {e}")
+
+                        except Exception as e:
+                            Domoticz.Error(f"FritzPresence: rename failed idx={Devices[x].ID} name='{name}': {e}")
+                            Domoticz.Debug(traceback.format_exc())
+
+            Domoticz.Debug("----------------------------------------------------")
+
+        except Exception as e:
+            Domoticz.Error(f"FritzPresence: onHeartbeat crashed: {e}")
+            Domoticz.Debug(traceback.format_exc())
 
     def getImage(self, name: str = ICON_PERSON):
         Domoticz.Debug("getImage({})".format(name))
@@ -587,53 +602,75 @@ def createSelectorSwitch():
         updateImageByUnit(UNIT_CMD_SWITCH_IDX, ICON_ADMIN)
 
 
+def getNextFreeUnit(start_unit=UNIT_DEV_START_IDX):
+    u = start_unit
+    while u in Devices:
+        u += 1
+    return u
+
 def createDevice(unit: int, devName: str, devId: str, image: str = ICON_PERSON):
     """
-    this creates the switch for one single host entry.
-    before it checks if it might be already there using devId.
-    if so, this would return matching unit number.
-
-    Arguments:
-        unit {int} -- unit number to use, if None we create a new one
-        devName {str} -- name for that device
-        devId {str} -- unique id of that device eg MacAddress
-        image {str} -- image to use, default person
+    Creates the switch for one single host entry.
+    If device (devId) already exists, returns the existing unit.
+    If unit is None, pick next free unit.
     Returns:
-        int -- the correct unit number for this device
+        int unit number, or None if creation failed.
     """
 
-    # create the mandatory devices if not yet exist
+    # If device already exists (by DeviceID), reuse it
     if devId is not None:
         idx = getUnit4DeviceID(devId)
-        if(idx is not None):
-            Domoticz.Debug("BLZ:createDevice: Looks like device with id: {} was created under unit: {}".format(devId,
-                                                                                                  idx))
-            if(idx != unit):
-                Domoticz.Log("BLZ:createDevice: Device with id: {} was created under unit: {} and not {}".format(devId,
-                                                                                                    idx, unit))
+        if idx is not None:
+            Domoticz.Debug(
+                "BLZ:createDevice: Looks like device with id: {} was created under unit: {}".format(devId, idx)
+            )
+            # Only log mismatch if caller forced a specific unit
+            if unit is not None and idx != unit:
+                Domoticz.Log(
+                    "BLZ:createDevice: Device with id: {} was created under unit: {} and not {}".format(devId, idx, unit)
+                )
             return idx
-    Domoticz.Debug("BLZ:createDevice: Device does not exist - create it ...")
-    if unit is None:
-        Domoticz.Debug("BLZ:createDevice: Given Unit was NONE, so just take next available")
-        unit = len(Devices) + 1
-    if unit in Devices:
-        Domoticz.Debug("BLZ:createDevice: Looks like unit {} is already used by {}. Take next".format(unit, Devices[unit].Name) )
-        unit = len(Devices) + 1
 
+    Domoticz.Debug("BLZ:createDevice: Device does not exist - create it ...")
+
+    # Choose a unit
+    if unit is None:
+        Domoticz.Debug("BLZ:createDevice: Given Unit was NONE, pick next free unit")
+        unit = getNextFreeUnit()
+    elif unit in Devices:
+        Domoticz.Debug(
+            "BLZ:createDevice: Looks like unit {} is already used by {}. Take next free".format(unit, Devices[unit].Name)
+        )
+        unit = getNextFreeUnit(unit + 1)
+
+    # Create device if unit is free
+    if unit in Devices:
+        Domoticz.Error(
+            "BLZ:createDevice: Cannot create device - unit {} is already used by {}.".format(unit, Devices[unit].Name)
+        )
+        return None
+
+    Domoticz.Device(
+        Name=devName,
+        Unit=unit,
+        TypeName="Switch",
+        DeviceID=devId,
+        Options={"Custom": ("1;Foo")},
+        Used=1
+    ).Create()
+
+    # Verify Domoticz actually created it
     if unit not in Devices:
-        Domoticz.Device(Name=devName, Unit=unit, TypeName="Switch",
-                        DeviceID=devId,
-                        Options={"Custom": ("1;Foo")}, Used=1).Create()
-        # work around, default behavior is using Hardwarename+' '+devname
-        # Devices[unit].Update(Name=devName)
-        updateImageByUnit(unit, image)
-        Domoticz.Log("BLZ:createDevice: Device  unit={} id={} created".format(
-            unit, devId))
-    else:
-        Domoticz.Error("BLZ:createDevice: Should never happen, as we double checked before.... But looks like unit {} is already used by {}.".format(unit, Devices[unit].Name) )
-        
-        
+        Domoticz.Error(
+            "BLZ:createDevice: Create() failed (device not present after Create). "
+            "Domoticz may block new devices (Accept new devices)."
+        )
+        return None
+
+    updateImageByUnit(unit, image)
+    Domoticz.Log("BLZ:createDevice: Device unit={} id={} created".format(unit, devId))
     return unit
+
 
 
 def updateDeviceByDevId(devId: str, alarmLevel, alarmData, name: str = '', dscr: str = '', alwaysUpdate=False):
@@ -652,9 +689,11 @@ def updateDeviceByDevId(devId: str, alarmLevel, alarmData, name: str = '', dscr:
     """
     Domoticz.Debug("updateDeviceByDevId: devId {}, name {} ".format(devId, name))
     unit = getUnit4DeviceID(devId)
+    if unit is None:
+        Domoticz.Error(f"updateDeviceByDevId: DeviceID '{devId}' not found, cannot update.")
+        return
     updateDeviceByUnit(unit, alarmLevel, alarmData, name, dscr, alwaysUpdate)
-
-
+    
 def updateDeviceByUnit(Unit: int, alarmLevel, alarmData, name: str = '', dscr: str = '', alwaysUpdate=False):
     """standard update with unit number.
        Device will only be updated only if values are changed or alwaysUpdate = True
@@ -680,14 +719,13 @@ def updateDeviceByUnit(Unit: int, alarmLevel, alarmData, name: str = '', dscr: s
                 Devices[Unit].Update(int(alarmLevel), alarmData, Name=name,
                                      Description=dscr)
 
-            Domoticz.Log("Update #{} Name: {} nV: {} sV: {}  ".format(
+            Domoticz.Debug("Update #{} Name: {} nV: {} sV: {}  ".format(
                 Unit, Devices[Unit].Name, str(alarmLevel), str(alarmData)))
         else:
-            Domoticz.Log("BLZ: Remains Unchanged")
+            Domoticz.Debug("BLZ: Remains Unchanged")
     else:
         Domoticz.Error(
             "Devices[{}] is unknown. So we cannot update it.".format(Unit))
-
 
 def updateImageByDevId(devId: str, picture):
     """push a new image to given device.
@@ -700,28 +738,28 @@ def updateImageByDevId(devId: str, picture):
     unit = getUnit4DeviceID(devId)
     updateImageByUnit(unit, picture)
 
-
 def updateImageByUnit(Unit: int, picture):
-    """push a new image to given device.
-       standard way using unit number to find matching entry/device.
-       If unit does not exist print error log and do nothing.
-    Arguments:
-        Unit {int} -- number of this device
-        picture {[type]} -- picture to use
-    """
+    """push a new image to given device."""
+    if Unit is None:
+        Domoticz.Debug("Image: skip update, Unit is None (picture={})".format(picture))
+        return
+
     Domoticz.Debug("Image: Update Unit: {} Image: {}".format(Unit, picture))
+
+    # optional: wenn picture fehlt, nicht alles als Error ausgeben
     if Unit in Devices and picture in Images:
-        Domoticz.Debug("Image: Name:{}\tId:{}".format(
-            picture, Images[picture].ID))
+        Domoticz.Debug("Image: Name:{}\tId:{}".format(picture, Images[picture].ID))
         if Devices[Unit].Image != Images[picture].ID:
-            Domoticz.Log("Image: Device Image update: 'Fritz!Box', Currently " +
-                         str(Devices[Unit].Image) + ", should be " + str(Images[picture].ID))
-            Devices[Unit].Update(nValue=Devices[Unit].nValue, sValue=str(Devices[Unit].sValue),
-                                 Image=Images[picture].ID)
-            # Devices[Unit].Update(int(alarmLevel), alarmData, Name=name)
+            Domoticz.Log(
+                "Image: Device Image update: 'Fritz!Box', Currently {}, should be {}".format(
+                    Devices[Unit].Image, Images[picture].ID
+                )
+            )
+            Devices[Unit].Update(
+                nValue=Devices[Unit].nValue,
+                sValue=str(Devices[Unit].sValue),
+                Image=Images[picture].ID
+            )
     else:
-        Domoticz.Error("BLZ: Image: Unit or Picture {} unknown".format(picture))
-        Domoticz.Error("BLZ: Number of icons loaded = " + str(len(Images)))
-        for image in Images:
-            Domoticz.Error("Image: {} id: {} name: {}".format(image, Images[image].ID, Images[image].Name))
-    return
+        # besser: nur Debug statt Error, sonst nervt es ohne Ende
+        Domoticz.Debug("Image: skip (Unit in Devices? {} | picture in Images? {})".format(Unit in Devices, picture in Images))
