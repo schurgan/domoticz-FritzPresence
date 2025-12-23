@@ -5,7 +5,7 @@
 [![GitHub license](https://img.shields.io/github/license/belzetrigger/domoticz-FritzBox.svg)](https://github.com/belzetrigger/domoticz-FritzPresence/blob/master/LICENSE)
 -->
 
-[![PyPI pyversions](https://img.shields.io/badge/python-3.6%20|%203.7%20|%203.8%203.9-blue.svg)]() 
+[![PyPI pyversions](https://img.shields.io/badge/python-3.6%20|%203.7%20|%203.8%20|%203.9%20|%203.11-blue.svg)]() 
 [![Plugin version](https://img.shields.io/badge/version-1.0.0-red.svg)](https://github.com/belzetrigger/domoticz-FritzPresence/branches/)
 
 Primary a Presence Detector that works with your [Fritz!Box](https://en.avm.de/, 'Fritz!Box are quite famous router from avm'). And also lets you add easily other known hosts from your Box to Domoticz.
