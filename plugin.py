@@ -6,7 +6,7 @@
 """
 <plugin key="FritzPresence" name="Fritz!Presence Plugin"
     author="belze/schurgan/ChatGPT" version="1.0.0" 
-    externallink="https://github.com/belzetrigger/domoticz-FritzPresence" >
+    externallink="https://github.com/schurgan/domoticz-FritzPresence" >
     
     <!--    
     wikilink="http://www.domoticz.com/wiki/plugins/plugin.html"
